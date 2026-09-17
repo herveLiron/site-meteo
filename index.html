@@ -19,6 +19,7 @@
     --series-1:       #2a78d6; /* avant 2000 */
     --series-2:       #eb6834; /* 2000-2014 */
     --series-3:       #1baf7a; /* depuis 2015 */
+    --series-4:       #eda100; /* mesuré aujourd'hui */
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -34,6 +35,7 @@
       --series-1:       #3987e5;
       --series-2:       #d95926;
       --series-3:       #199e70;
+      --series-4:       #c98500;
     }
   }
 
@@ -193,6 +195,9 @@ const PERIODES = [
 
 const HEURES = Array.from({length: 24}, (_, h) => `${h}h`);
 
+const SERIE_MESUREE = { label: "Mesuré aujourd'hui", varColor: "--series-4" };
+let liveData = null; // { date, hourly: [24 valeurs ou null], updated_at }
+
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -200,7 +205,7 @@ function cssVar(name) {
 let chart;
 
 function buildDatasets(doy) {
-  return PERIODES.map(p => ({
+  const datasets = PERIODES.map(p => ({
     label: p.label,
     data: (NORMALES[p.key] && NORMALES[p.key][String(doy)]) || Array(24).fill(null),
     borderColor: cssVar(p.varColor),
@@ -212,6 +217,23 @@ function buildDatasets(doy) {
     tension: 0.35,
     spanGaps: true,
   }));
+
+  if (doy === todayDoy() && liveData && Array.isArray(liveData.hourly)) {
+    datasets.push({
+      label: SERIE_MESUREE.label,
+      data: liveData.hourly,
+      borderColor: cssVar(SERIE_MESUREE.varColor),
+      backgroundColor: cssVar(SERIE_MESUREE.varColor),
+      borderWidth: 2,
+      pointRadius: 3,
+      pointHoverRadius: 6,
+      pointHitRadius: 12,
+      tension: 0.2,
+      spanGaps: false,
+    });
+  }
+
+  return datasets;
 }
 
 function chartOptions() {
@@ -298,8 +320,25 @@ function footNote() {
   const fenetre = meta.fenetre_jours;
   const per = meta.periodes || {};
   const parts = PERIODES.map(p => `${p.label} : ${per[p.key] ? per[p.key].nb_annees : '?'} ans`);
-  document.getElementById('foot-note').textContent =
-    `Médiane horaire calculée sur une fenêtre glissante de ±${fenetre} jours autour de la date affichée, toutes années confondues par période. ${parts.join(' · ')}. Source : Météo-France, données publiques DPClim.`;
+  let texte = `Médiane horaire calculée sur une fenêtre glissante de ±${fenetre} jours autour de la date affichée, toutes années confondues par période. ${parts.join(' · ')}. Source : Météo-France, données publiques DPClim.`;
+  if (liveData && liveData.updated_at) {
+    const maj = new Date(liveData.updated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    texte += ` Courbe « Mesuré aujourd'hui » : station météo personnelle, mise à jour à ${maj}.`;
+  }
+  document.getElementById('foot-note').textContent = texte;
+}
+
+async function fetchLiveData() {
+  try {
+    const resp = await fetch('/api/exterieur-jour');
+    if (!resp.ok) return;
+    const json = await resp.json();
+    liveData = json;
+    footNote();
+    if (currentDoy === todayDoy()) render(currentDoy);
+  } catch (e) {
+    // Silencieux : la courbe mesurée est un complément, pas bloquant pour le reste de la page.
+  }
 }
 
 let currentDoy = todayDoy();
@@ -331,6 +370,8 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
 
 footNote();
 render(currentDoy);
+fetchLiveData();
+setInterval(fetchLiveData, 5 * 60 * 1000);
 </script>
 </body>
 </html>

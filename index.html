@@ -345,6 +345,7 @@ function render(doy) {
   document.getElementById('day-slider').value = doy;
 
   const datasets = buildDatasets(doy);
+  footNote();
 
   if (!chart) {
     const ctx = document.getElementById('chart').getContext('2d');

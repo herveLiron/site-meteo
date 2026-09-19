@@ -175,6 +175,7 @@ async function handleExterieurArchive(request, isoDate, env, ctx) {
   if (cached) return cached;
 
   const stored = await env.MESURES_JOUR.get(`mesure:${isoDate}`);
+  const noData = !stored;
   const body =
     stored ??
     JSON.stringify({
@@ -190,8 +191,11 @@ async function handleExterieurArchive(request, isoDate, env, ctx) {
   const response = new Response(body, {
     headers: {
       "Content-Type": "application/json",
-      // Une journée archivée ne change plus : cache long côté edge.
-      "Cache-Control": "public, max-age=3600, s-maxage=86400",
+      // Une journée déjà archivée ne change plus : cache long côté edge. Mais tant
+      // qu'elle n'a pas encore été archivée (pas encore de cron/backfill passé dessus),
+      // on garde un cache très court pour ne pas figer un "pas de donnée" 24h si un
+      // visiteur passe juste avant que l'archive ne soit écrite.
+      "Cache-Control": noData ? "public, max-age=20, s-maxage=30" : "public, max-age=3600, s-maxage=86400",
     },
   });
 

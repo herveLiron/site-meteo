@@ -10,7 +10,7 @@
 //   chaque nuit par le handler `scheduled` qui archive la journée qui vient de se terminer.
 //   Chaque entrée expire automatiquement au bout d'environ 1 an (fenêtre glissante).
 
-const ENTITY_ID = "sensor.gw2000a_outdoor_temperature";
+const ENTITY_ID = "sensor.ws3900a_outdoor_temperature";
 const HA_BASE = "https://ha.rvliron.fr";
 const CACHE_TTL_SECONDS = 600; // 10 minutes (donnée "aujourd'hui", encore en évolution)
 const TIMEZONE = "Europe/Paris";

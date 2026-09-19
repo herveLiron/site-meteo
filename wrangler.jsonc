@@ -5,5 +5,16 @@
   "assets": {
     "directory": ".",
     "binding": "ASSETS"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "MESURES_JOUR",
+      "id": "c6ee1585a2a2413e9410cb1b2e741045"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "0 2 * * *"
+    ]
   }
 }

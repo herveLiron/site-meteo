@@ -196,7 +196,45 @@ const PERIODES = [
 const HEURES = Array.from({length: 24}, (_, h) => `${h}h`);
 
 const SERIE_MESUREE = { label: "Mesuré aujourd'hui", varColor: "--series-4" };
-let liveData = null; // { date, hourly: [24 valeurs ou null], updated_at }
+let liveData = null; // { date, hourly: [24 valeurs ou null], updated_at } — toujours "aujourd'hui"
+const archiveCache = new Map(); // "AAAA-MM-JJ" -> hourly[24] | null (null = pas de donnée archivée)
+
+function dateToISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Convertit un "jour de l'année" (1-365, modèle simplifié sans année, cf. todayDoy) en la
+// date réelle la plus récente correspondant à cette position dans le cycle annuel :
+// cette année si le jour est déjà passé, sinon l'année précédente.
+function doyToRecentDate(doy) {
+  const delta = todayDoy() - doy;
+  const wrapped = delta >= 0 ? delta : delta + 365;
+  const d = new Date();
+  d.setDate(d.getDate() - wrapped);
+  return d;
+}
+
+// Charge (si besoin) la donnée mesurée archivée pour le jour `doy`, puis redessine le
+// graphique une fois arrivée si l'utilisateur est toujours sur ce jour-là. "Aujourd'hui"
+// est géré à part par fetchLiveData().
+async function ensureMeasuredData(doy) {
+  if (doy === todayDoy()) return;
+  const iso = dateToISO(doyToRecentDate(doy));
+  if (archiveCache.has(iso)) return;
+  let hourly = null;
+  try {
+    const resp = await fetch(`/api/exterieur-jour?date=${iso}`);
+    const json = await resp.json();
+    if (json && Array.isArray(json.hourly) && !json.no_data) hourly = json.hourly;
+  } catch (e) {
+    // Silencieux : la courbe mesurée est un complément, pas bloquant pour le reste de la page.
+  }
+  archiveCache.set(iso, hourly);
+  if (typeof currentDoy !== 'undefined' && currentDoy === doy) render(currentDoy);
+}
 
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -218,10 +256,17 @@ function buildDatasets(doy) {
     spanGaps: true,
   }));
 
-  if (doy === todayDoy() && liveData && Array.isArray(liveData.hourly)) {
+  const activeDate = doyToRecentDate(doy);
+  const activeISO = dateToISO(activeDate);
+  const isToday = doy === todayDoy();
+  const mesureHourly = isToday
+    ? (liveData && Array.isArray(liveData.hourly) ? liveData.hourly : null)
+    : (archiveCache.get(activeISO) || null);
+
+  if (mesureHourly) {
     datasets.push({
-      label: SERIE_MESUREE.label,
-      data: liveData.hourly,
+      label: isToday ? SERIE_MESUREE.label : `Mesuré le ${activeDate.toLocaleDateString('fr-FR')}`,
+      data: mesureHourly,
       borderColor: cssVar(SERIE_MESUREE.varColor),
       backgroundColor: cssVar(SERIE_MESUREE.varColor),
       borderWidth: 2,
@@ -321,9 +366,19 @@ function footNote() {
   const per = meta.periodes || {};
   const parts = PERIODES.map(p => `${p.label} : ${per[p.key] ? per[p.key].nb_annees : '?'} ans`);
   let texte = `Médiane horaire calculée sur une fenêtre glissante de ±${fenetre} jours autour de la date affichée, toutes années confondues par période. ${parts.join(' · ')}. Source : Météo-France, données publiques DPClim.`;
-  if (liveData && liveData.updated_at) {
-    const maj = new Date(liveData.updated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-    texte += ` Courbe « Mesuré aujourd'hui » : station météo personnelle, mise à jour à ${maj}.`;
+  const isToday = typeof currentDoy !== 'undefined' && currentDoy === todayDoy();
+  if (isToday) {
+    if (liveData && liveData.updated_at) {
+      const maj = new Date(liveData.updated_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      texte += ` Courbe « Mesuré aujourd'hui » : station météo personnelle, mise à jour à ${maj}.`;
+    }
+  } else if (typeof currentDoy !== 'undefined') {
+    const activeISO = dateToISO(doyToRecentDate(currentDoy));
+    if (archiveCache.has(activeISO)) {
+      texte += archiveCache.get(activeISO)
+        ? ` Courbe « Mesuré » : archive de la station météo personnelle pour cette journée.`
+        : ` Pas de donnée mesurée archivée pour cette journée (hors de la fenêtre d'environ 1 an, ou jour non couvert).`;
+    }
   }
   document.getElementById('foot-note').textContent = texte;
 }
@@ -346,18 +401,22 @@ let currentDoy = todayDoy();
 document.getElementById('day-slider').addEventListener('input', (e) => {
   currentDoy = parseInt(e.target.value, 10);
   render(currentDoy);
+  ensureMeasuredData(currentDoy);
 });
 document.getElementById('prev-day').addEventListener('click', () => {
   currentDoy = currentDoy <= 1 ? 365 : currentDoy - 1;
   render(currentDoy);
+  ensureMeasuredData(currentDoy);
 });
 document.getElementById('next-day').addEventListener('click', () => {
   currentDoy = currentDoy >= 365 ? 1 : currentDoy + 1;
   render(currentDoy);
+  ensureMeasuredData(currentDoy);
 });
 document.getElementById('today-btn').addEventListener('click', () => {
   currentDoy = todayDoy();
   render(currentDoy);
+  ensureMeasuredData(currentDoy);
 });
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
